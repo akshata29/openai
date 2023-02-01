@@ -1,0 +1,5 @@
+An Income statement shows a company's revenues, expenses and profitability over a period of time.
+A Balance Sheet is a statement of a business's assets, liabilities, and owner's equity as of any given date.
+A Cash flow Statement provides data regarding all cash inflows that a company receives from it's ongoing operations and external investment sources.
+
+Based on the description above, classify the following table into one of the following classes: "ncome Statement", "Balance Sheet", "Cash Flow Statement" or "Other".  Only use the specified classes.
