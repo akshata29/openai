@@ -11,7 +11,6 @@ import azure.functions as func
 from azure.search.documents import SearchClient
 from azure.core.credentials import AzureKeyCredential
 
-
 service_endpoint = os.getenv("AZURE_SEARCH_SERVICE_ENDPOINT")
 index_name = os.getenv("AZURE_SEARCH_INDEX_NAME")
 key = os.getenv("AZURE_SEARCH_API_KEY")
@@ -69,6 +68,21 @@ def cogsearch_query(search_text_string, numberofresults):
 
 
 
+def cogsearch_query(search_text_string, numberofresults):
+    
+    from azure.core.credentials import AzureKeyCredential
+    from azure.search.documents import SearchClient
+
+    search_client = SearchClient(service_endpoint, index_name, AzureKeyCredential(key))
+    results = search_client.search(search_text=search_text_string, include_total_count =1, top=numberofresults)
+    print("records containing the string")
+    for result in results:
+            print(json.dumps(result))
+    return results
+
+
+
+
 def compose_response(json_data):
     values = json.loads(json_data)['values']
     # Prepare the Output before the loop
@@ -86,6 +100,8 @@ def compose_response(json_data):
 def transform_value(value):
       
     # Validate the inputs
+      
+    # Validate the inputs
     try:
         assert ('searchQuery' in value), "'searchQuery' field is required."
         searchQuery = value['searchquery']   
@@ -93,6 +109,7 @@ def transform_value(value):
     except AssertionError  as error:
         return None
 
+  
       # Validate the inputs
     try:
         assert ('seachItemNumbers' in value), "'seachItemNumbers' field is will be defaulted to 10."
@@ -102,3 +119,6 @@ def transform_value(value):
         seachItemNumbers = 10
     search_result = cogsearch_query(searchQuery, seachItemNumbers)
     return search_result
+        
+
+
