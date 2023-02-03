@@ -1,7 +1,7 @@
 # Do not include azure-functions-worker as it may conflict with the Azure Functions platform
 
 azure-functions
-azure-ai-textanalytics
+azure-ai-textanalytics==5.3.0b1
 openai
 openai[embeddings]
 azure-core

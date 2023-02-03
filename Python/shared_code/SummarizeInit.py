@@ -13,10 +13,14 @@ import os
 import pandas as pd
 import numpy as np
 from openai.embeddings_utils import get_embedding, cosine_similarity
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.textanalytics import TextAnalyticsClient
 
 opanaiKey = os.environ['OpenAiKey']
 openaiEndpoint = os.environ['OpenAiEndPoint']
 openAiVersion = os.environ['OpenAiVersion']
+languageKey = os.environ['LanguageKey']
+languageEndpoint = os.environ['LanguageEndPoint']
 
 #Splits text after sentences ending in a period. Combines n sentences per chunk.
 def splitter(n, s):
@@ -50,7 +54,8 @@ def main(req: func.HttpRequest, context: func.Context) -> func.HttpResponse:
         userQuery = req.params.get('userQuery')
         totalDocs = req.params.get('totalDocs')
         modelName = req.params.get('modelName')
-        logging.info("Input parameters : " + userQuery + " " + totalDocs + " " + modelName)
+        modelType = req.params.get('modelType')
+        #logging.info("Input parameters : " + userQuery + " " + totalDocs + " " + modelName)
         body = json.dumps(req.get_json())
     except ValueError:
         return func.HttpResponse(
@@ -59,7 +64,7 @@ def main(req: func.HttpRequest, context: func.Context) -> func.HttpResponse:
         )
     
     if body:
-        result = compose_response(userQuery, totalDocs, modelName, body)
+        result = compose_response(userQuery, totalDocs, modelName, modelType, body)
         return func.HttpResponse(result, mimetype="application/json")
     else:
         return func.HttpResponse(
@@ -67,7 +72,7 @@ def main(req: func.HttpRequest, context: func.Context) -> func.HttpResponse:
              status_code=400
         )
 
-def compose_response(userQuery, totalDocs, modelName, json_data):
+def compose_response(userQuery, totalDocs, modelName, modelType, json_data):
     values = json.loads(json_data)['values']
     
     # Prepare the Output before the loop
@@ -75,13 +80,96 @@ def compose_response(userQuery, totalDocs, modelName, json_data):
     results["values"] = []
 
     for value in values:
-        output_record = transform_value(value, userQuery, totalDocs, modelName)
+        output_record = transform_value(value, userQuery, totalDocs, modelName, modelType)
         if output_record != None:
             results["values"].append(output_record)
     return json.dumps(results, ensure_ascii=False)        
 
+def summarizeOpenAi(userQuery, myStringList, modelName):
+    openai.api_type = "azure"
+    openai.api_key = opanaiKey
+    openai.api_base = openaiEndpoint
+    openai.api_version = openAiVersion
+
+    '''
+    Designing a prompt that will show and tell GPT-3 how to proceed. 
+    + Providing an instruction to summarize the text about the general topic (prefix)
+    + Providing quality data for the chunks to summarize and specifically mentioning they are the text provided (context + context primer)
+    + Providing a space for GPT-3 to fill in the summary to follow the format (suffix)
+    '''
+
+    #prompt_i = userQuery + '\n\n\Text:\n' + ' '.join([normalize_text(myStringList)])
+    prompt_i = userQuery + '\m\nText:\n' + ' '.join(myStringList)
+    #logging.info(prompt_i)
+
+    # for item in myStringList:
+    #     logging.info(prompt_i)
+    #     logging.info(item)
+    #     prompt_i = prompt_i + '\n\n\Text:\n' + " ".join([normalize_text(item)])
+
+    prompt = "".join([prompt_i, '\n\n Summary:\n'])
+
+    #logging.info("Prompt ", prompt)
+
+    # Using a temperature a low temperature to limit the creativity in the response. 
+    response = openai.Completion.create(
+            engine= modelName,
+            prompt = prompt,
+            temperature = 0.4,
+            max_tokens = 500,
+            top_p = 1.0,
+            frequency_penalty=0.5,
+            presence_penalty = 0.5,
+            best_of = 1
+        )
+
+    summaryResponse = response.choices[0].text
+    return summaryResponse
+
+def summarizeLanguage(myStringList):
+    text_analytics_client = TextAnalyticsClient(
+        endpoint=languageEndpoint,
+        credential=AzureKeyCredential(languageKey),
+    )
+    document = []
+    document.append(' '.join(myStringList))
+    # document = [
+    #     "At Microsoft, we have been on a quest to advance AI beyond existing techniques, by taking a more holistic, "
+    #     "human-centric approach to learning and understanding. As Chief Technology Officer of Azure AI Cognitive "
+    #     "Services, I have been working with a team of amazing scientists and engineers to turn this quest into a "
+    #     "reality. In my role, I enjoy a unique perspective in viewing the relationship among three attributes of "
+    #     "human cognition: monolingual text (X), audio or visual sensory signals, (Y) and multilingual (Z). At the "
+    #     "intersection of all three, there's magic-what we call XYZ-code as illustrated in Figure 1-a joint "
+    #     "representation to create more powerful AI that can speak, hear, see, and understand humans better. "
+    #     "We believe XYZ-code will enable us to fulfill our long-term vision: cross-domain transfer learning, "
+    #     "spanning modalities and languages. The goal is to have pretrained models that can jointly learn "
+    #     "representations to support a broad range of downstream AI tasks, much in the way humans do today. "
+    #     "Over the past five years, we have achieved human performance on benchmarks in conversational speech "
+    #     "recognition, machine translation, conversational question answering, machine reading comprehension, "
+    #     "and image captioning. These five breakthroughs provided us with strong signals toward our more ambitious "
+    #     "aspiration to produce a leap in AI capabilities, achieving multisensory and multilingual learning that "
+    #     "is closer in line with how humans learn and understand. I believe the joint XYZ-code is a foundational "
+    #     "component of this aspiration, if grounded with external knowledge sources in the downstream AI tasks."
+    # ]
+    try:
+        
+        poller = text_analytics_client.begin_abstract_summary(document)
+        abstract_summary_results = poller.result()
+        for result in abstract_summary_results:
+            if result.kind == "AbstractiveSummarization":
+                print("Summaries abstracted:")
+                #[print(f"{summary.text}\n") for summary in result.summaries]
+                summaryResponse = result.summaries[0].text
+            elif result.is_error is True:
+                summaryResponse = "...Is an error with code '{}' and message '{}'".format(result.code, result.message)
+    except:
+        print("Exception occured")
+        summaryResponse = "Exception occured"
+
+    return summaryResponse
+
 ## Perform an operation on a record
-def transform_value(record, userQuery, totalDocs, modelName):
+def transform_value(record, userQuery, totalDocs, modelName, modelType):
     try:
         recordId = record['recordId']
     except AssertionError  as error:
@@ -113,11 +201,6 @@ def transform_value(record, userQuery, totalDocs, modelName):
             })
 
     try:
-        openai.api_type = "azure"
-        openai.api_key = opanaiKey
-        openai.api_base = openaiEndpoint
-        openai.api_version = openAiVersion
-
         # Getting the items from the values/data/text
         myStringList = []
         myStringList = data['text']
@@ -125,39 +208,12 @@ def transform_value(record, userQuery, totalDocs, modelName):
         # Cleaning the list, removing duplicates
         myStringList = list(dict.fromkeys(myStringList))
 
-        '''
-        Designing a prompt that will show and tell GPT-3 how to proceed. 
-        + Providing an instruction to summarize the text about the general topic (prefix)
-        + Providing quality data for the chunks to summarize and specifically mentioning they are the text provided (context + context primer)
-        + Providing a space for GPT-3 to fill in the summary to follow the format (suffix)
-        '''
+        if modelType == "Language":
+            summaryResponse = summarizeLanguage(myStringList)
+        elif modelType == "OpenAI":
+            summaryResponse = summarizeOpenAi(userQuery, myStringList, modelName)
 
-        #prompt_i = userQuery + '\n\n\Text:\n' + ' '.join([normalize_text(myStringList)])
-        prompt_i = userQuery + '\m\nText:\n' + ' '.join(myStringList)
-        #logging.info(prompt_i)
-
-        # for item in myStringList:
-        #     logging.info(prompt_i)
-        #     logging.info(item)
-        #     prompt_i = prompt_i + '\n\n\Text:\n' + " ".join([normalize_text(item)])
-
-        prompt = "".join([prompt_i, '\n\n Summary:\n'])
-
-        #logging.info("Prompt ", prompt)
-
-        # Using a temperature a low temperature to limit the creativity in the response. 
-        response = openai.Completion.create(
-                engine= modelName,
-                prompt = prompt,
-                temperature = 0.4,
-                max_tokens = 500,
-                top_p = 1.0,
-                frequency_penalty=0.5,
-                presence_penalty = 0.5,
-                best_of = 1
-            )
-
-        summaryResponse = response.choices[0].text
+        
         return ({
             "recordId": recordId,
             "data": {
