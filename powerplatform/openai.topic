@@ -1,0 +1,53 @@
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent:
+    displayName: OpenAI
+    triggerQueries:
+      - ai
+      - chatgpt
+      - openai
+
+  actions:
+    - kind: SendMessage
+      id: sendMessage_HahjKg
+      message: Nice to see you, Let's get rolling and help you answer your curious questions
+
+    - kind: Question
+      id: question_t1fUJw
+      alwaysPrompt: false
+      interruptionPolicy:
+        allowInterruption: true
+
+      variable: init:Global.userQuery
+      prompt: What is your question?
+      repeatCount: 2
+      entity: StringPrebuiltEntity
+
+    - kind: InvokeFlowAction
+      id: invokeFlowAction_rar0fc
+      input:
+        binding:
+          text: =Global.userQuery
+
+      output:
+        binding:
+          useranswer: Topic.userAnswer
+
+      flowId: ce0bd74e-20a4-ed11-aad1-000d3a1f127c
+
+    - kind: SendMessage
+      id: sendMessage_x1xDDi
+      message: "{Topic.userAnswer}"
+
+    - kind: ClearAllVariables
+      id: URjYcu
+      variables: AllGlobalVariables
+
+    - kind: GotoAction
+      id: 5Dea4Y
+      actionId: question_t1fUJw
+
+inputType: {}
+outputType: {}
