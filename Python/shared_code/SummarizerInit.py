@@ -14,7 +14,10 @@ import pandas as pd
 import numpy as np
 from openai.embeddings_utils import get_embedding, cosine_similarity
 from azure.core.credentials import AzureKeyCredential
-from azure.ai.textanalytics import TextAnalyticsClient
+from azure.ai.textanalytics import (
+        TextAnalyticsClient,
+        ExtractSummaryAction
+    ) 
 
 opanaiKey = os.environ['OpenAiKey']
 openaiEndpoint = os.environ['OpenAiEndPoint']
@@ -55,7 +58,7 @@ def main(req: func.HttpRequest, context: func.Context) -> func.HttpResponse:
         totalDocs = req.params.get('totalDocs')
         modelName = req.params.get('modelName')
         modelType = req.params.get('modelType')
-        #logging.info("Input parameters : " + userQuery + " " + totalDocs + " " + modelName)
+        logging.info("Input parameters : " + userQuery + " " + totalDocs + " " + modelName + " " + modelType)
         body = json.dumps(req.get_json())
     except ValueError:
         return func.HttpResponse(
@@ -75,6 +78,7 @@ def main(req: func.HttpRequest, context: func.Context) -> func.HttpResponse:
 def compose_response(userQuery, totalDocs, modelName, modelType, json_data):
     values = json.loads(json_data)['values']
     
+    logging.info("Calling Compose Response")
     # Prepare the Output before the loop
     results = {}
     results["values"] = []
@@ -86,6 +90,7 @@ def compose_response(userQuery, totalDocs, modelName, modelType, json_data):
     return json.dumps(results, ensure_ascii=False)        
 
 def summarizeOpenAi(userQuery, myStringList, modelName):
+    logging.info("Calling Summarize Open AI")
     openai.api_type = "azure"
     openai.api_key = opanaiKey
     openai.api_base = openaiEndpoint
@@ -127,12 +132,14 @@ def summarizeOpenAi(userQuery, myStringList, modelName):
     return summaryResponse
 
 def summarizeLanguage(myStringList):
+    logging.info("Calling Summarize Language")
     text_analytics_client = TextAnalyticsClient(
         endpoint=languageEndpoint,
         credential=AzureKeyCredential(languageKey),
     )
     document = []
-    document.append(' '.join(myStringList))
+    document.append(myStringList)
+    print(myStringList)
     # document = [
     #     "At Microsoft, we have been on a quest to advance AI beyond existing techniques, by taking a more holistic, "
     #     "human-centric approach to learning and understanding. As Chief Technology Officer of Azure AI Cognitive "
@@ -153,15 +160,19 @@ def summarizeLanguage(myStringList):
     # ]
     try:
         
-        poller = text_analytics_client.begin_abstract_summary(document)
-        abstract_summary_results = poller.result()
-        for result in abstract_summary_results:
-            if result.kind == "AbstractiveSummarization":
-                print("Summaries abstracted:")
-                #[print(f"{summary.text}\n") for summary in result.summaries]
-                summaryResponse = result.summaries[0].text
-            elif result.is_error is True:
-                summaryResponse = "...Is an error with code '{}' and message '{}'".format(result.code, result.message)
+        poller = text_analytics_client.begin_analyze_actions(
+            document,
+            actions=[ExtractSummaryAction(max_sentence_count=4)],
+        )
+
+        document_results = poller.result()
+        for result in document_results:
+            extract_summary_result = result[0]  # first document, first result
+            if extract_summary_result.is_error:
+                summaryResponse = "...Is an error with code '{}' and message '{}'".format(
+                    extract_summary_result.code, extract_summary_result.message)
+            else:
+                summaryResponse = " ".join([sentence.text for sentence in extract_summary_result.sentences])
     except:
         print("Exception occured")
         summaryResponse = "Exception occured"
@@ -170,6 +181,7 @@ def summarizeLanguage(myStringList):
 
 ## Perform an operation on a record
 def transform_value(record, userQuery, totalDocs, modelName, modelType):
+    logging.info("Calling Tranform Value")
     try:
         recordId = record['recordId']
     except AssertionError  as error:
@@ -206,12 +218,12 @@ def transform_value(record, userQuery, totalDocs, modelName, modelType):
         myStringList = data['text']
 
         # Cleaning the list, removing duplicates
-        myStringList = list(dict.fromkeys(myStringList))
+        openAiList = list(dict.fromkeys(myStringList))
 
         if modelType == "Language":
             summaryResponse = summarizeLanguage(myStringList)
         elif modelType == "OpenAI":
-            summaryResponse = summarizeOpenAi(userQuery, myStringList, modelName)
+            summaryResponse = summarizeOpenAi(userQuery, openAiList, modelName)
 
         
         return ({
